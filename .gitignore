@@ -10,3 +10,6 @@ emacs/.emacs.d/transient/
 emacs/.emacs.d/treemacs-persist
 *.elc
 .DS_Store
+emacs/.emacs.d/eln-cache/
+emacs/.emacs.d/var/
+emacs/.emacs.d/projectile-bookmarks.eld
