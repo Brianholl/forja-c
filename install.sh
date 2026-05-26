@@ -21,8 +21,12 @@ AI_DIR="$SCRIPT_DIR/ai"
 
 if [ ! -f "$CORE_DIR/install.sh" ]; then
     info "Inicializando submodules (core, ai)..."
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -qi "successfully"; then
+        info "SSH no disponible — usando HTTPS para clonar submodules..."
+        git -C "$SCRIPT_DIR" config url."https://github.com/".insteadOf "git@github.com:"
+    fi
     git -C "$SCRIPT_DIR" submodule update --init --recursive \
-        || err "No se pudo inicializar submodules. Verifica acceso SSH a GitHub."
+        || err "No se pudo inicializar submodules."
 fi
 [ -f "$CORE_DIR/install.sh" ] || err "core/install.sh no encontrado tras init — revisa el repo."
 
