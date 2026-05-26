@@ -1,0 +1,554 @@
+#+TITLE: Módulo C — Toolchain, LSP, GDB y Herramientas
+#+AUTHOR: Brian Hollweg
+#+STARTUP: indent showeverything
+#+PROPERTY: header-args:emacs-lisp :tangle yes :results silent
+
+* TABLA DE CONTENIDOS
+- [[#10-toolchain-c-build--format][10. Toolchain C (Build & Format)]]
+  - [[#documentación-man][Documentación (man)]]
+  - [[#herramientas-de-análisis-disassembly][Herramientas de Análisis (Disassembly)]]
+  - [[#consulta-de-errores-con-ia][Consulta de Errores con IA]]
+- [[#20-análisis-estático-y-navegación-clangd][20. Análisis Estático y Navegación (Clangd)]]
+- [[#30-depuración-nativa-gdbgud][30. Depuración Nativa (GDB/GUD)]]
+- [[#40-c-como-lenguaje-mimado][40. C como Lenguaje Mimado]]
+- [[#50-generadores-de-proyecto][50. Generadores de Proyecto]]
+
+* 10. Toolchain C (Build & Format)
+
+*¿Por qué el estilo "linux"?* El estilo =linux= de Emacs es K&R con indentación de 8 espacios y llaves en la misma línea. Sobreescribimos el offset a 4 para proyectos de aprendizaje donde 8 espacios resultan excesivos en pantallas pequeñas.
+
+*¿Por qué =clangd= como LSP?* =clangd= es el LSP oficial de LLVM, con soporte activo. Entiende =compile_flags.txt= y =compile_commands.json= sin configuración extra.
+
+*¿Por qué Unity para tests?* Unity es C puro, un solo archivo (~600 líneas), sin dependencias. Para enseñar testing en C, importa que el alumno pueda leer el framework completo si quiere.
+
+*¿Por qué Makefile en vez de CMake para proyectos simples?* CMake genera archivos de build que generan el build real — dos capas de indirección que confunden más de lo que ayudan cuando el objetivo es entender la compilación. Con Makefile, =make build= corre exactamente =gcc src/*.c -o build/nombre=, visible sin abstracción.
+
+#+begin_src emacs-lisp
+;; --- 1. Estilo de Código ---
+(defun my/c-mode-setup ()
+  "Configuración personalizada para C."
+  (c-set-style "linux")
+  (setq c-basic-offset 4)
+  (setq indent-tabs-mode nil)
+  (display-line-numbers-mode t))
+
+(add-hook 'c-mode-hook #'my/c-mode-setup)
+
+;; --- 2. CMake (usado en algunos proyectos C) ---
+(use-package cmake-mode
+  :mode (("CMakeLists\\.txt\\'" . cmake-mode)
+         ("\\.cmake\\'" . cmake-mode)))
+
+;; --- 3. Sistema de Compilación Inteligente ---
+(defun my/find-and-compile ()
+  "Busca build.sh, Makefile, CMakeLists.txt o compila el archivo actual.
+   Soporte para nob.h (Tsoding style)."
+  (interactive)
+  (let* ((project-root (or (and (fboundp 'projectile-project-root)
+                                (projectile-project-root))
+                           default-directory))
+         (nob-script   (expand-file-name "nob.c"          project-root))
+         (build-script (expand-file-name "build.sh"       project-root))
+         (makefile     (expand-file-name "Makefile"       project-root))
+         (cmake-file   (expand-file-name "CMakeLists.txt" project-root)))
+    (cond
+     ;; 1. nob.h (Tsoding)
+     ((file-exists-p nob-script)
+      (let ((default-directory project-root))
+        (compile "cc nob.c -o nob && ./nob")))
+     ;; 2. build.sh
+     ((file-exists-p build-script)
+      (let ((default-directory project-root))
+        (compile build-script)))
+     ;; 3. Makefile — usa "make run" si el target existe, si no solo compila
+     ((file-exists-p makefile)
+      (let ((default-directory project-root)
+            (has-run (with-temp-buffer
+                       (insert-file-contents makefile)
+                       (re-search-forward "^run[ \t]*:" nil t))))
+        (compile (if has-run
+                     (format "make -C \"%s\" run" project-root)
+                   (format "make -C \"%s\"" project-root)))))
+     ;; 4. CMake genérico
+     ((file-exists-p cmake-file)
+      (let ((default-directory project-root))
+        (compile (format "cmake --build \"%s/build\"" project-root))))
+     ;; 5. Archivo suelto
+     ((buffer-file-name)
+      (save-buffer)
+      (let* ((file (file-name-nondirectory buffer-file-name))
+             (exe  (file-name-sans-extension file)))
+        (compile (format "gcc -Wall -g %s -o %s && ./%s" file exe exe))))
+     ;; 6. Fallback
+     (t (message "No se encontró build system válido")))))
+
+;; F5 para compilar en C
+(add-hook 'c-mode-hook
+          (lambda () (local-set-key (kbd "<f5>") #'my/find-and-compile)))
+
+;; Auto-scroll en compilación
+(setq compilation-scroll-output t)
+
+;; --- 4. Formateo con clang-format ---
+(use-package clang-format
+  :bind (:map c-mode-base-map
+              ("C-c F b" . clang-format-buffer)
+              ("C-c F r" . clang-format-region)))
+
+;; --- 5. Proyecto C con nob.h (Tsoding style) ---
+(defvar my/forjarc-projects-base
+  (expand-file-name "~/Dev/forjarc/proyectos/")
+  "Directorio raíz para proyectos ForjarC.")
+
+(defun my/new-nob-project (name)
+  "Crea estructura básica para un proyecto C manejado por nob.h."
+  (interactive "sNombre del proyecto: ")
+  (let ((project-dir (expand-file-name name (concat my/forjarc-projects-base "c/"))))
+    (make-directory project-dir t)
+    (make-directory (concat project-dir "/src") t)
+    (make-directory (concat project-dir "/build") t)
+    (shell-command (format "curl -sLo %s/nob.h https://raw.githubusercontent.com/tsoding/nob.h/main/nob.h" project-dir))
+    (with-temp-file (concat project-dir "/nob.c")
+      (insert "#define NOB_IMPLEMENTATION\n")
+      (insert "#include \"nob.h\"\n\n")
+      (insert "int main(int argc, char **argv) {\n")
+      (insert "    NOB_GO_REBUILD_URSELF(argc, argv);\n\n")
+      (insert "    Nob_Cmd cmd = {0};\n")
+      (insert "    nob_cmd_append(&cmd, \"gcc\");\n")
+      (insert "    nob_cmd_append(&cmd, \"-Wall\", \"-Wextra\", \"-g\");\n")
+      (insert "    nob_cmd_append(&cmd, \"-o\", \"build/main\");\n")
+      (insert "    nob_cmd_append(&cmd, \"src/main.c\");\n\n")
+      (insert "    nob_log(NOB_INFO, \"Compilando...\");\n")
+      (insert "    if (!nob_cmd_run_sync(cmd)) return 1;\n")
+      (insert "    nob_log(NOB_INFO, \"OK\");\n")
+      (insert "    return 0;\n")
+      (insert "}\n"))
+    (with-temp-file (concat project-dir "/src/main.c")
+      (insert "#include <stdio.h>\n\n")
+      (insert "int main(void) {\n")
+      (insert (format "    printf(\"Hola desde %s con nob.h!\\n\");\n" name))
+      (insert "    return 0;\n")
+      (insert "}\n"))
+    (with-temp-file (concat project-dir "/.gitignore")
+      (insert "build/\nnob\n*.o\n"))
+    (with-temp-file (concat project-dir "/.projectile") (insert ""))
+    (message "Proyecto nob creado: %s" project-dir)
+    (find-file (concat project-dir "/src/main.c"))))
+#+end_src
+
+** Documentación (man)
+
+#+begin_src emacs-lisp
+(defun my/system-man-at-point ()
+  "Llama al man nativo para el símbolo bajo el cursor."
+  (interactive)
+  (let ((symbol (thing-at-point 'symbol)))
+    (if symbol
+        (man symbol)
+      (man (read-string "Manual entry: ")))))
+
+(add-hook 'c-mode-hook
+          (lambda () (local-set-key (kbd "C-c h") #'my/system-man-at-point)))
+#+end_src
+
+** Herramientas de Análisis (Disassembly)
+
+#+begin_src emacs-lisp
+(use-package disaster
+  :ensure t
+  :bind (:map c-mode-base-map
+              ("C-c d a" . disaster)))
+#+end_src
+
+** Consulta de Errores con IA
+
+#+begin_src emacs-lisp
+(defun my/consultar-error-ia ()
+  "Envía el error de compilación y el código a Ollama."
+  (interactive)
+  (let* ((codigo (buffer-substring-no-properties (point-min) (point-max)))
+         (error-msg (if (get-buffer "*compilation*")
+                        (with-current-buffer "*compilation*"
+                          (buffer-substring-no-properties (point-min) (point-max)))
+                      "No hay buffer de compilación disponible."))
+         (prompt (format "Hola. Estoy programando en C.
+Mi código es:\n---\n%s\n---\n
+El error de compilación es:\n---\n%s\n---\n
+No me des la solución directa. Explícame el error de forma pedagógica
+y dame pistas para que yo mismo pueda arreglarlo."
+                         codigo error-msg)))
+    (message "Analizando error con Ollama...")
+    (gptel-request prompt
+      :system "Eres un mentor de programación C experto y paciente. Tu objetivo es enseñar, no solo corregir."
+      :callback (lambda (response info)
+                  (if (not response)
+                      (message "Error: ¿Está Ollama corriendo?")
+                    (with-current-buffer (get-buffer-create "*Consulta IA*")
+                      (erase-buffer)
+                      (require 'markdown-mode nil t)
+                      (when (fboundp 'markdown-mode) (markdown-mode))
+                      (insert response)
+                      (display-buffer (current-buffer))
+                      (message "Explicación lista.")))))))
+
+(global-set-key (kbd "C-c C") #'my/consultar-error-ia)
+#+end_src
+
+* 20. Análisis Estático y Navegación (Clangd)
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'lsp-mode
+  (setq lsp-clients-clangd-args
+        '("--header-insertion=never"
+          "--background-index"
+          "--clang-tidy"
+          "--completion-style=detailed"
+          "--pch-storage=memory"
+          "-j=4")))
+
+(add-hook 'c-mode-hook #'lsp-deferred)
+
+(defun my/c-lsp-ui-setup ()
+  "Ajustes de lsp-ui para buffers C."
+  (setq lsp-ui-doc-enable t)
+  (setq lsp-ui-doc-position 'at-point)
+  (setq lsp-ui-doc-max-width 150)
+  (setq lsp-ui-doc-max-height 30)
+  (setq lsp-ui-sideline-enable t)
+  (setq lsp-ui-sideline-show-code-actions t)
+  (setq lsp-ui-sideline-show-hover nil)
+  (setq lsp-ui-sideline-show-diagnostics nil)
+  (setq lsp-headerline-breadcrumb-enable t)
+  (setq-local lsp-semantic-tokens-enable t))
+
+(add-hook 'c-mode-hook #'my/c-lsp-ui-setup)
+#+end_src
+
+* 30. Depuración Nativa (GDB/GUD)
+
+#+begin_src emacs-lisp
+(setq gdb-many-windows t)
+(setq gdb-show-main t)
+
+(global-set-key (kbd "<f9>")    #'gdb)
+(global-set-key (kbd "<f10>")   #'gud-next)
+(global-set-key (kbd "<f11>")   #'gud-step)
+(global-set-key (kbd "S-<f11>") #'gud-finish)
+(global-set-key (kbd "<f8>")    #'gud-cont)
+
+(defun my/debug-current-file ()
+  "Compila con -g y lanza GDB automáticamente."
+  (interactive)
+  (let* ((file (buffer-file-name))
+         (exe  (file-name-sans-extension file)))
+    (compile (format "gcc -g -Wall %s -o %s" file exe))
+    (sit-for 1)
+    (gdb (format "gdb -i=mi %s" exe))))
+
+(global-set-key (kbd "C-c d") #'my/debug-current-file)
+
+(defhydra my/hydra-gdb (:color pink :hint nil)
+  "
+  ForjarC — GDB
+  ──────────────────────────────────
+  Ejecución:  _r_un  _c_ont  _k_ill
+  Stepping:   _n_ext _s_tep  _f_inish
+  Break:      _b_reak en línea  _B_orrar break  _w_atch expr
+  Inspect:    _p_rint expr      _u_ntil línea
+  ──────────────────────────────────
+  _q_ salir del hydra
+"
+  ("r" gud-run          :color pink)
+  ("c" gud-cont         :color pink)
+  ("k" (when (get-buffer-process (gud-format-command "%s" 0))
+         (kill-process (get-buffer-process gud-comint-buffer)))
+       :color blue)
+  ("n" gud-next         :color pink)
+  ("s" gud-step         :color pink)
+  ("f" gud-finish       :color pink)
+  ("b" gud-break        :color pink)
+  ("B" gud-remove       :color pink)
+  ("w" gud-watch        :color pink)
+  ("p" gud-print        :color pink)
+  ("u" gud-until        :color pink)
+  ("q" nil              :color blue))
+
+(add-hook 'c-mode-hook
+          (lambda () (local-set-key (kbd "C-c G") #'my/hydra-gdb/body)))
+#+end_src
+
+* 40. C como Lenguaje Mimado
+
+Herramientas de calidad completas para C: tests, cobertura, sanitizers, Valgrind y GDB avanzado.
+Todas asumen un proyecto con =Makefile= (generado por =C-c n c=).
+
+** 40.1 Tests (Unity)
+
+#+begin_src emacs-lisp
+(defun my/c-run-tests ()
+  "Ejecuta make test en la raíz del proyecto."
+  (interactive)
+  (let ((root (or (and (fboundp 'projectile-project-root)
+                       (projectile-project-root))
+                  default-directory)))
+    (if (file-exists-p (expand-file-name "Makefile" root))
+        (let ((default-directory root))
+          (compile "make test"))
+      (message "No hay Makefile — usa C-c n c para crear el proyecto"))))
+#+end_src
+
+** 40.2 Cobertura de código (gcov + lcov)
+
+#+begin_src emacs-lisp
+(defun my/c-coverage ()
+  "Compila con --coverage, genera reporte lcov y lo abre en el navegador."
+  (interactive)
+  (let* ((root (or (and (fboundp 'projectile-project-root)
+                        (projectile-project-root))
+                   default-directory))
+         (report (expand-file-name "coverage/index.html" root)))
+    (if (file-exists-p (expand-file-name "Makefile" root))
+        (progn
+          (let ((default-directory root))
+            (compile "make coverage"))
+          (run-with-timer 5 nil
+                          (lambda ()
+                            (when (file-exists-p report)
+                              (browse-url report)))))
+      (message "No hay Makefile — usa C-c n c para crear el proyecto"))))
+#+end_src
+
+** 40.3 Sanitizers (AddressSanitizer + UBSanitizer)
+
+#+begin_src emacs-lisp
+(defun my/c-run-asan ()
+  "Compila y ejecuta con AddressSanitizer + UBSanitizer."
+  (interactive)
+  (let ((root (or (and (fboundp 'projectile-project-root)
+                       (projectile-project-root))
+                  default-directory)))
+    (if (file-exists-p (expand-file-name "Makefile" root))
+        (let ((default-directory root))
+          (compile "make asan"))
+      (message "No hay Makefile — usa C-c n c para crear el proyecto"))))
+
+(defun my/c-run-ubsan ()
+  "Compila y ejecuta solo con UBSanitizer."
+  (interactive)
+  (let ((root (or (and (fboundp 'projectile-project-root)
+                       (projectile-project-root))
+                  default-directory)))
+    (if (file-exists-p (expand-file-name "Makefile" root))
+        (let ((default-directory root))
+          (compile "make ubsan"))
+      (message "No hay Makefile — usa C-c n c para crear el proyecto"))))
+#+end_src
+
+** 40.4 Valgrind
+
+#+begin_src emacs-lisp
+(defun my/c-valgrind ()
+  "Analiza memoria con Valgrind (make valgrind)."
+  (interactive)
+  (let ((root (or (and (fboundp 'projectile-project-root)
+                       (projectile-project-root))
+                  default-directory)))
+    (if (file-exists-p (expand-file-name "Makefile" root))
+        (let ((default-directory root))
+          (compile "make valgrind"))
+      (message "No hay Makefile — usa C-c n c para crear el proyecto"))))
+#+end_src
+
+** 40.5 Hydra C Tools (C-c X)
+
+#+begin_src emacs-lisp
+(defhydra my/hydra-c-tools (:color blue :hint nil)
+  "
+  ForjarC — C Tools
+  ──────────────────────────────────────────
+  _t_  make test           _c_  coverage (gcov+lcov)
+  _a_  AddressSanitizer    _u_  UBSanitizer
+  _v_  Valgrind            _s_  clang-tidy
+  ──────────────────────────────────────────
+  _g_  GDB hydra           _q_  cancelar
+"
+  ("t" my/c-run-tests)
+  ("c" my/c-coverage)
+  ("a" my/c-run-asan)
+  ("u" my/c-run-ubsan)
+  ("v" my/c-valgrind)
+  ("s" (let ((root (or (and (fboundp 'projectile-project-root)
+                            (projectile-project-root))
+                       default-directory)))
+         (compile (format "clang-tidy %s -- -Iinclude"
+                          (or buffer-file-name "src/*.c")))))
+  ("g" my/hydra-gdb/body :color blue)
+  ("q" nil))
+
+(add-hook 'c-mode-hook
+          (lambda () (local-set-key (kbd "C-c X") #'my/hydra-c-tools/body)))
+#+end_src
+
+* 50. Generadores de Proyecto
+
+** 50.1 Proyecto C estándar (Makefile + Unity + Sanitizers)
+
+#+begin_src emacs-lisp
+(defun my/new-c-project (name)
+  "Crea proyecto C con Makefile profesional (build/test/coverage/asan/valgrind)."
+  (interactive "sNombre del proyecto: ")
+  (let ((project-dir (expand-file-name name (concat my/forjarc-projects-base "c/"))))
+    (make-directory (concat project-dir "/src")         t)
+    (make-directory (concat project-dir "/include")     t)
+    (make-directory (concat project-dir "/build")       t)
+    (make-directory (concat project-dir "/tests/unity") t)
+    (with-temp-file (concat project-dir "/Makefile")
+      (insert (format "PROJECT = %s\nCC = gcc\n" name))
+      (insert "CFLAGS  = -Wall -Wextra -std=c11 -g -Iinclude\n\n")
+      (insert "SRC    = $(wildcard src/*.c)\n")
+      (insert "OBJ    = $(patsubst src/%.c, build/%.o, $(SRC))\n")
+      (insert "TARGET = build/$(PROJECT)\n\n")
+      (insert "UNITY  = tests/unity/unity.c\n")
+      (insert "TESTS  = $(wildcard tests/test_*.c)\n\n")
+      (insert ".PHONY: all build test coverage asan ubsan valgrind clean run\n\n")
+      (insert "all: build\nbuild: $(TARGET)\n\n")
+      (insert "$(TARGET): $(OBJ) | build/\n\t$(CC) $(CFLAGS) -o $@ $^\n\n")
+      (insert "build/%.o: src/%.c | build/\n\t$(CC) $(CFLAGS) -c -o $@ $<\n\n")
+      (insert "build/:\n\t@mkdir -p $@\n\n")
+      (insert "test: $(UNITY) build\n")
+      (insert "\t$(CC) $(CFLAGS) $(TESTS) $(UNITY) $(filter-out build/main.o,$(OBJ)) -o build/test_runner\n")
+      (insert "\t./build/test_runner\n\n")
+      (insert "$(UNITY):\n\t@mkdir -p tests/unity\n")
+      (insert "\t@curl -sLo tests/unity/unity.h     https://raw.githubusercontent.com/ThrowTheSwitch/Unity/master/src/unity.h\n")
+      (insert "\t@curl -sLo tests/unity/unity.c     https://raw.githubusercontent.com/ThrowTheSwitch/Unity/master/src/unity.c\n")
+      (insert "\t@curl -sLo tests/unity/unity_internals.h https://raw.githubusercontent.com/ThrowTheSwitch/Unity/master/src/unity_internals.h\n\n")
+      (insert "coverage: CFLAGS += --coverage\ncoverage: clean build test\n")
+      (insert "\t@mkdir -p coverage\n")
+      (insert "\tlcov -c -d build/ -o coverage/coverage.info --rc lcov_branch_coverage=1\n")
+      (insert "\tgenhtml coverage/coverage.info -o coverage/\n\n")
+      (insert "asan: CFLAGS += -fsanitize=address,undefined\nasan: clean $(TARGET)\n\t./$(TARGET)\n\n")
+      (insert "ubsan: CFLAGS += -fsanitize=undefined\nubsan: clean $(TARGET)\n\t./$(TARGET)\n\n")
+      (insert "run: build\n\t./$(TARGET)\n\n")
+      (insert "valgrind: build\n\tvalgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(TARGET)\n\n")
+      (insert "clean:\n\trm -rf build/ coverage/ *.gcov *.gcda *.gcno\n"))
+    (with-temp-file (concat project-dir "/compile_flags.txt")
+      (insert "-Iinclude\n-Wall\n-Wextra\n-std=c11\n-g\n"))
+    (with-temp-file (concat project-dir "/src/main.c")
+      (insert "#include <stdio.h>\n\nint main(void) {\n")
+      (insert (format "    printf(\"Hola desde %s\\n\");\n" name))
+      (insert "    return 0;\n}\n"))
+    (with-temp-file (concat project-dir "/tests/test_main.c")
+      (insert "#include \"unity/unity.h\"\n\n")
+      (insert "void setUp(void)    {}\nvoid tearDown(void) {}\n\n")
+      (insert "void test_ejemplo(void) {\n    TEST_ASSERT_EQUAL(2, 1 + 1);\n}\n\n")
+      (insert "int main(void) {\n    UNITY_BEGIN();\n    RUN_TEST(test_ejemplo);\n    return UNITY_END();\n}\n"))
+    (with-temp-file (concat project-dir "/.gitignore")
+      (insert "build/\ncoverage/\ntests/unity/\n*.o\n*.gcov\n*.gcda\n*.gcno\n"))
+    (with-temp-file (concat project-dir "/.projectile") (insert ""))
+    (message "Proyecto C creado: %s" project-dir)
+    (find-file (concat project-dir "/src/main.c"))))
+#+end_src
+
+** 50.2 Proyecto Raylib / Game Dev en C
+
+#+begin_src emacs-lisp
+(defun my/new-gamedev-project (name)
+  "Crea proyecto Raylib en C puro con arquitectura limpia (Input/Update/Draw)."
+  (interactive "sNombre del proyecto: ")
+  (let ((project-dir (expand-file-name name (concat my/forjarc-projects-base "gamedev/"))))
+    (make-directory (concat project-dir "/src")    t)
+    (make-directory (concat project-dir "/assets") t)
+    (with-temp-file (concat project-dir "/build.sh")
+      (insert "#!/bin/bash\nset -e\n\n")
+      (insert "CC=gcc\n")
+      (insert "CFLAGS=\"-Wall -Wextra -std=c11 -g\"\n")
+      (insert (format "OUT=\"%s\"\n\n" name))
+      (insert "echo \"Compilando...\"\n")
+      (insert "$CC $CFLAGS src/*.c -o $OUT -lraylib -lm\n./$OUT\n"))
+    (set-file-modes (concat project-dir "/build.sh") #o755)
+    (with-temp-file (concat project-dir "/compile_flags.txt")
+      (insert "-Iinclude\n"))
+    (with-temp-file (concat project-dir "/src/main.c")
+      (insert "#include <raylib.h>\n\nint main(void) {\n")
+      (insert "    const int screenWidth = 800, screenHeight = 600;\n")
+      (insert (format "    InitWindow(screenWidth, screenHeight, \"%s\");\n" name))
+      (insert "    SetTargetFPS(60);\n")
+      (insert "    int ballX = 400, ballY = 300, ballSpeed = 5;\n")
+      (insert "    Color myGreen = {20, 160, 133, 255};\n\n")
+      (insert "    while (!WindowShouldClose()) {\n")
+      (insert "        if (IsKeyDown(KEY_RIGHT)) ballX += ballSpeed;\n")
+      (insert "        if (IsKeyDown(KEY_LEFT))  ballX -= ballSpeed;\n")
+      (insert "        if (IsKeyDown(KEY_UP))    ballY -= ballSpeed;\n")
+      (insert "        if (IsKeyDown(KEY_DOWN))  ballY += ballSpeed;\n")
+      (insert "        BeginDrawing();\n        ClearBackground(myGreen);\n")
+      (insert "        DrawCircle(ballX, ballY, 50, WHITE);\n        EndDrawing();\n    }\n\n")
+      (insert "    CloseWindow();\n    return 0;\n}\n"))
+    (with-temp-file (concat project-dir "/.gitignore")
+      (insert (format "build/\n%s\n*.o\n" name)))
+    (with-temp-file (concat project-dir "/.projectile") (insert ""))
+    (message "Proyecto Raylib/C creado: %s" project-dir)
+    (find-file (concat project-dir "/src/main.c"))))
+#+end_src
+
+* Dependencias y registro
+
+#+begin_src emacs-lisp
+(when (fboundp 'my/forja-dep)
+  (my/forja-dep :module "c" :binary "gcc"     :type :required :arch "gcc"     :wsl "build-essential" :termux "clang")
+  (my/forja-dep :module "c" :binary "clangd"  :type :required :arch "clang"   :wsl "clangd"          :termux "clang")
+  (my/forja-dep :module "c" :binary "make"    :type :required :arch "make"    :wsl "make"            :termux "make")
+  (my/forja-dep :module "c" :binary "gdb"     :type :required :arch "gdb"     :wsl "gdb"             :termux nil)
+  (my/forja-dep :module "c" :binary "valgrind":type :optional :arch "valgrind":wsl "valgrind"        :termux nil))
+
+(when (fboundp 'my/forja-register-lang)
+  (my/forja-register-lang
+   :modes   '(c-mode c-ts-mode)
+   :run     'my/find-and-compile :run-fallback    "make run"
+   :build   'my/find-and-compile :build-fallback  "make"
+   :test    'my/c-run-tests      :test-fallback   "make test"
+   :format  'clang-format-buffer :format-fallback nil))
+#+end_src
+
+* Doctor y dashboard
+
+#+begin_src emacs-lisp
+;; Registrar checks en el doctor genérico
+(add-to-list 'my/forja-doctor-groups
+  '("Compilador y build"
+    ("gcc"       . "GCC (compilador C)")
+    ("make"      . "Make")
+    ("cmake"     . "CMake")
+    ("clangd"    . "clangd (LSP)")
+    ("clang-tidy". "clang-tidy")))
+
+(add-to-list 'my/forja-doctor-groups
+  '("Debug y análisis"
+    ("gdb"     . "GDB (debugger)")
+    ("valgrind". "Valgrind (memoria)")
+    ("lcov"    . "lcov (cobertura)")
+    ("gcov"    . "gcov (cobertura)")
+    ("objdump" . "objdump (binario)")
+    ("strace"  . "strace (syscalls)")))
+
+;; Línea de estado para el dashboard
+(defun my/forja-c-status-line ()
+  "Estado del toolchain C para el dashboard."
+  (let ((gcc (executable-find "gcc"))
+        (gdb (executable-find "gdb")))
+    (concat
+     (propertize "  C      " 'face 'font-lock-comment-face)
+     (if gcc
+         (propertize "gcc " 'face '(:foreground "#10b981"))
+       (propertize "gcc " 'face '(:foreground "#475569")))
+     (if gdb
+         (propertize "gdb " 'face '(:foreground "#10b981"))
+       (propertize "gdb " 'face '(:foreground "#475569")))
+     (if (executable-find "clangd")
+         (propertize "clangd" 'face '(:foreground "#10b981"))
+       (propertize "clangd" 'face '(:foreground "#475569"))))))
+
+(add-to-list 'my/forja-dashboard-status-lines #'my/forja-c-status-line)
+
+;; Alias genérico para el botón del dashboard
+(defalias 'my/new-project 'my/new-c-project)
+#+end_src

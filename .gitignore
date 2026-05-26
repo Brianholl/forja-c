@@ -1,0 +1,12 @@
+emacs/.emacs.d/elpa/
+emacs/.emacs.d/modules/*.el
+emacs/.emacs.d/custom.el
+emacs/.emacs.d/local.el
+emacs/.emacs.d/tmp/
+emacs/.emacs.d/.lsp-session-v1
+emacs/.emacs.d/recentf
+emacs/.emacs.d/bookmarks
+emacs/.emacs.d/transient/
+emacs/.emacs.d/treemacs-persist
+*.elc
+.DS_Store

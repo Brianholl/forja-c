@@ -1,0 +1,13 @@
+{
+  "interfaceFontSize": 15,
+  "promptDelete": true,
+  "defaultViewMode": "source",
+  "strictLineBreaks": false,
+  "showLineNumber": true,
+  "spellcheck": false,
+  "spellcheckLanguages": [
+    "es"
+  ],
+  "readableLineLength": true,
+  "showFrontmatter": false
+}
