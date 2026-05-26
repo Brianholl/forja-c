@@ -1,6 +1,6 @@
 [submodule "core"]
 	path = core
-	url = git@github.com:Brianholl/forja-core.git
+	url = https://github.com/Brianholl/forja-core.git
 [submodule "ai"]
 	path = ai
-	url = git@github.com:Brianholl/forja-ai.git
+	url = https://github.com/Brianholl/forja-ai.git
