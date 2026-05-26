@@ -81,14 +81,28 @@ fi
 # [4] PROYECTOS C
 # =============================================================================
 step "4 — Directorio de proyectos"
-mkdir -p "$HOME/forja-org/local/projects/c"
-ok "~/forja-org/local/projects/c/ listo"
+mkdir -p "$HOME/forja/org/local/projects/c"
+ok "~/forja/org/local/projects/c/ listo"
 
 # =============================================================================
-# FISH FUNCTION
+# COMANDO forja-c (funciona en bash y fish)
 # =============================================================================
-FISH_FUNC="$HOME/.config/fish/functions/forja-c.fish"
-if [ ! -f "$FISH_FUNC" ]; then
+mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/forja-c" << CMD
+#!/bin/bash
+emacs --init-directory $SCRIPT_DIR/emacs/.emacs.d/ "\$@" &
+disown
+CMD
+chmod +x "$HOME/.local/bin/forja-c"
+ok "Comando ~/.local/bin/forja-c creado"
+
+if ! grep -q '\.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+    ok "~/.local/bin agregado al PATH en ~/.bashrc"
+fi
+
+if command -v fish &>/dev/null; then
+    FISH_FUNC="$HOME/.config/fish/functions/forja-c.fish"
     mkdir -p "$(dirname "$FISH_FUNC")"
     cat > "$FISH_FUNC" << FISH
 function forja-c --description "Emacs forja-c — C IDE"
@@ -98,11 +112,3 @@ end
 FISH
     ok "Fish function forja-c creada"
 fi
-
-echo ""
-echo -e "${BOLD}${GREEN}━━━ forja-c instalado ━━━${NC}"
-echo ""
-echo "  Uso:"
-echo "    forja-c              → abrir forja-c"
-echo "    forja-c archivo.c    → abrir archivo"
-echo ""
