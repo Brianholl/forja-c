@@ -548,7 +548,4 @@ Todas asumen un proyecto con =Makefile= (generado por =C-c n c=).
        (propertize "clangd" 'face '(:foreground "#475569"))))))
 
 (add-to-list 'my/forja-dashboard-status-lines #'my/forja-c-status-line)
-
-;; Alias genérico para el botón del dashboard
-(defalias 'my/new-project 'my/new-c-project)
 #+end_src
