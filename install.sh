@@ -94,9 +94,9 @@ ok "~/forja-org/local/projects/c/ listo"
 FISH_FUNC="$HOME/.config/fish/functions/forja-c.fish"
 if [ ! -f "$FISH_FUNC" ]; then
     mkdir -p "$(dirname "$FISH_FUNC")"
-    cat > "$FISH_FUNC" << 'FISH'
+    cat > "$FISH_FUNC" << FISH
 function forja-c --description "Emacs forja-c — C IDE"
-    emacs --init-directory ~/Dev/forja-c/emacs/.emacs.d/ $argv &
+    emacs --init-directory $SCRIPT_DIR/emacs/.emacs.d/ \$argv &
     disown
 end
 FISH
