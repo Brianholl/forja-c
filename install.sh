@@ -26,7 +26,19 @@ if [ ! -f "$CORE_DIR/install.sh" ]; then
 fi
 [ -f "$CORE_DIR/install.sh" ] || err "core/install.sh no encontrado tras init — revisa el repo."
 
-[[ "${1:-}" == "--verify" ]] && { bash "$CORE_DIR/install.sh" --verify; exit $?; }
+[[ "${1:-}" == "--verify" ]] && {
+    bash "$CORE_DIR/doctor.sh" "forja-c" \
+        "emacs:Emacs 30+" \
+        "gcc:GCC (compilador C)" \
+        "clangd:clangd (LSP)" \
+        "gdb:GDB (debugger)" \
+        "make:Make" \
+        "git:Git" \
+        "valgrind:Valgrind (memoria):optional" \
+        "lcov:lcov (cobertura):optional" \
+        "astyle:Astyle (formato):optional"
+    exit $?
+}
 
 command -v pacman &>/dev/null || err "Requiere Arch Linux."
 
@@ -112,3 +124,27 @@ end
 FISH
     ok "Fish function forja-c creada"
 fi
+
+mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/doctor-c" << CMD
+#!/bin/bash
+bash $SCRIPT_DIR/core/doctor.sh "forja-c" \
+        "emacs:Emacs 30+" \
+        "gcc:GCC (compilador C)" \
+        "clangd:clangd (LSP)" \
+        "gdb:GDB (debugger)" \
+        "make:Make" \
+        "git:Git" \
+        "valgrind:Valgrind (memoria):optional" \
+        "lcov:lcov (cobertura):optional" \
+        "astyle:Astyle (formato):optional"
+CMD
+chmod +x "$HOME/.local/bin/doctor-c"
+
+echo ""
+echo -e "${BOLD}${GREEN}━━━ forja-c instalado ━━━${NC}"
+echo ""
+echo "  forja-c              → abrir IDE"
+echo "  forja-c archivo.c    → abrir archivo"
+echo "  doctor-c             → verificar instalación"
+echo ""
