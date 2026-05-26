@@ -96,14 +96,11 @@
               ("C-c F r" . clang-format-region)))
 
 ;; --- 5. Proyecto C con nob.h (Tsoding style) ---
-(defvar my/forjarc-projects-base
-  (expand-file-name "~/Dev/forjarc/proyectos/")
-  "Directorio raíz para proyectos ForjarC.")
 
 (defun my/new-nob-project (name)
   "Crea estructura básica para un proyecto C manejado por nob.h."
   (interactive "sNombre del proyecto: ")
-  (let ((project-dir (expand-file-name name (concat my/forjarc-projects-base "c/"))))
+  (let ((project-dir (expand-file-name name (concat (my/mu-projects-base) "c/"))))
     (make-directory project-dir t)
     (make-directory (concat project-dir "/src") t)
     (make-directory (concat project-dir "/build") t)
@@ -394,10 +391,10 @@ Todas asumen un proyecto con =Makefile= (generado por =C-c n c=).
 ** 50.1 Proyecto C estándar (Makefile + Unity + Sanitizers)
 
 #+begin_src emacs-lisp
-(defun my/new-c-project (name)
+(defun my/new-c-makefile-project (name)
   "Crea proyecto C con Makefile profesional (build/test/coverage/asan/valgrind)."
   (interactive "sNombre del proyecto: ")
-  (let ((project-dir (expand-file-name name (concat my/forjarc-projects-base "c/"))))
+  (let ((project-dir (expand-file-name name (concat (my/mu-projects-base) "c/"))))
     (make-directory (concat project-dir "/src")         t)
     (make-directory (concat project-dir "/include")     t)
     (make-directory (concat project-dir "/build")       t)
@@ -455,7 +452,7 @@ Todas asumen un proyecto con =Makefile= (generado por =C-c n c=).
 (defun my/new-gamedev-project (name)
   "Crea proyecto Raylib en C puro con arquitectura limpia (Input/Update/Draw)."
   (interactive "sNombre del proyecto: ")
-  (let ((project-dir (expand-file-name name (concat my/forjarc-projects-base "gamedev/"))))
+  (let ((project-dir (expand-file-name name (concat (my/mu-projects-base) "gamedev/"))))
     (make-directory (concat project-dir "/src")    t)
     (make-directory (concat project-dir "/assets") t)
     (with-temp-file (concat project-dir "/build.sh")
@@ -507,6 +504,18 @@ Todas asumen un proyecto con =Makefile= (generado por =C-c n c=).
    :build   'my/find-and-compile :build-fallback  "make"
    :test    'my/c-run-tests      :test-fallback   "make test"
    :format  'clang-format-buffer :format-fallback nil))
+
+;; ─── Dispatcher: C-c n en forja-c ────────────────────────────────────────────
+
+(defun my/new-c-project ()
+  "Elige tipo de proyecto C y llama al generador correspondiente."
+  (interactive)
+  (let* ((tipos '(("C puro       (Makefile + gcc/gdb/valgrind)" . my/new-c-makefile-project)
+                  ("Videojuego   (Raylib — Input/Update/Draw)"  . my/new-gamedev-project)
+                  ("NOB          (nob.h — header-only build)"   . my/new-nob-project)))
+         (choice (completing-read "Tipo de proyecto C: " (mapcar #'car tipos) nil t))
+         (fn (cdr (assoc choice tipos))))
+    (when fn (call-interactively fn))))
 #+end_src
 
 * Doctor y dashboard
