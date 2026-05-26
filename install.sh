@@ -19,7 +19,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CORE_DIR="$SCRIPT_DIR/core"
 AI_DIR="$SCRIPT_DIR/ai"
 
-[ -f "$CORE_DIR/install.sh" ] || err "Submodule core no inicializado. Ejecuta: git submodule update --init --recursive"
+if [ ! -f "$CORE_DIR/install.sh" ]; then
+    info "Inicializando submodules (core, ai)..."
+    git -C "$SCRIPT_DIR" submodule update --init --recursive \
+        || err "No se pudo inicializar submodules. Verifica acceso SSH a GitHub."
+fi
+[ -f "$CORE_DIR/install.sh" ] || err "core/install.sh no encontrado tras init — revisa el repo."
 
 [[ "${1:-}" == "--verify" ]] && { bash "$CORE_DIR/install.sh" --verify; exit $?; }
 
