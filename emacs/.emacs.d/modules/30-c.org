@@ -361,29 +361,30 @@ Todas asumen un proyecto con =Makefile= (generado por =C-c n c=).
 #+begin_src emacs-lisp
 (defhydra my/hydra-c-tools (:color blue :hint nil)
   "
-  ForjarC — C Tools
-  ──────────────────────────────────────────
+  forja-c ── Compilar / Herramientas ─────────────────
+  _r_  run (F5)            _b_  build (make)
   _t_  make test           _c_  coverage (gcov+lcov)
   _a_  AddressSanitizer    _u_  UBSanitizer
   _v_  Valgrind            _s_  clang-tidy
-  ──────────────────────────────────────────
-  _g_  GDB hydra           _q_  cancelar
+  _g_  GDB hydra           _?_  inspect     _q_  cancelar
 "
+  ("r" my/find-and-compile)
+  ("b" (compile "make"))
   ("t" my/c-run-tests)
   ("c" my/c-coverage)
   ("a" my/c-run-asan)
   ("u" my/c-run-ubsan)
   ("v" my/c-valgrind)
-  ("s" (let ((root (or (and (fboundp 'projectile-project-root)
-                            (projectile-project-root))
-                       default-directory)))
-         (compile (format "clang-tidy %s -- -Iinclude"
-                          (or buffer-file-name "src/*.c")))))
+  ("s" (compile (format "clang-tidy %s -- -Iinclude"
+                        (or buffer-file-name "src/*.c"))))
   ("g" my/hydra-gdb/body :color blue)
+  ("?" my/forja-inspect)
   ("q" nil))
 
 (add-hook 'c-mode-hook
-          (lambda () (local-set-key (kbd "C-c X") #'my/hydra-c-tools/body)))
+          (lambda ()
+            (local-set-key (kbd "C-c X") #'my/hydra-c-tools/body)
+            (local-set-key (kbd "C-c x") #'my/hydra-c-tools/body)))
 #+end_src
 
 * 50. Generadores de Proyecto
